@@ -1,0 +1,383 @@
+openapi: 3.1.0
+info:
+  title: Docling Serve API
+  description: |
+    Complete API specification for Docling Serve, matching the FastAPI implementation.
+    Used for client generation (Python, Java, TypeScript) and contract testing.
+  version: 1.0.0
+  contact:
+    name: Docling Project
+    url: https://github.com/docling-project/docling-serve
+
+servers:
+  - url: http://localhost:5001
+    description: Local development server
+  - url: https://docling-serve.example.com
+    description: Production server
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: getHealth
+      tags: [health]
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+
+  /v1/convert/source:
+    post:
+      summary: Convert documents synchronously from sources
+      operationId: convertSourceSync
+      tags: [convert]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConvertDocumentsRequest'
+      responses:
+        '200':
+          description: Conversion results
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ConvertDocumentResponse'
+                  - $ref: '#/components/schemas/PresignedUrlConvertDocumentResponse'
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/convert/source/async:
+    post:
+      summary: Convert documents asynchronously from sources
+      operationId: convertSourceAsync
+      tags: [convert]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConvertDocumentsRequest'
+      responses:
+        '200':
+          description: Task queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatusResponse'
+
+  /v1/convert/file:
+    post:
+      summary: Convert uploaded files synchronously
+      operationId: convertFileSync
+      tags: [convert]
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                options:
+                  type: object
+                  additionalProperties: true
+                target_type:
+                  type: string
+                  enum: [IN_BODY, ZIP]
+      responses:
+        '200':
+          description: Conversion results
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ConvertDocumentResponse'
+                  - $ref: '#/components/schemas/PresignedUrlConvertDocumentResponse'
+            application/zip:
+              schema:
+                type: string
+                format: binary
+
+  /v1/convert/file/async:
+    post:
+      summary: Convert uploaded files asynchronously
+      operationId: convertFileAsync
+      tags: [convert]
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                options:
+                  type: object
+                  additionalProperties: true
+                target_type:
+                  type: string
+                  enum: [IN_BODY, ZIP]
+      responses:
+        '200':
+          description: Task queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatusResponse'
+
+  /v1/status/poll/{task_id}:
+    get:
+      summary: Poll task status
+      operationId: taskStatusPoll
+      tags: [tasks]
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: wait
+          in: query
+          schema:
+            type: number
+            format: float
+            default: 0.0
+      responses:
+        '200':
+          description: Task status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStatusResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/result/{task_id}:
+    get:
+      summary: Get task result
+      operationId: taskResult
+      tags: [tasks]
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task result
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ConvertDocumentResponse'
+                  - $ref: '#/components/schemas/PresignedUrlConvertDocumentResponse'
+                  - $ref: '#/components/schemas/ChunkDocumentResponse'
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v1/clear/converters:
+    get:
+      summary: Clear loaded converters/models
+      operationId: clearConverters
+      tags: [clear]
+      responses:
+        '200':
+          description: Converters cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClearResponse'
+
+  /v1/status/ws/{task_id}:
+    get:
+      summary: WebSocket task status updates
+      operationId: taskStatusWS
+      tags: [tasks]
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: apikey
+          in: query
+          schema:
+            type: string
+      responses:
+        '101':
+          description: WebSocket connection established
+
+components:
+  schemas:
+    HealthCheckResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [UP, DOWN, DEGRADED]
+      required: [status]
+
+    TaskStatusResponse:
+      type: object
+      properties:
+        task_id:
+          type: string
+        task_type:
+          type: string
+        task_status:
+          type: string
+        task_position:
+          type: integer
+        task_meta:
+          type: object
+          additionalProperties: true
+      required: [task_id, task_type, task_status]
+
+    ConvertDocumentsRequest:
+      type: object
+      properties:
+        sources:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/FileSourceRequest'
+              - $ref: '#/components/schemas/HttpSourceRequest'
+              - $ref: '#/components/schemas/S3SourceRequest'
+        options:
+          type: object
+          additionalProperties: true
+        target:
+          type: string
+          enum: [IN_BODY, ZIP]
+      required: [sources]
+
+    FileSourceRequest:
+      type: object
+      properties:
+        filename:
+          type: string
+        content:
+          type: string
+          format: byte
+
+    HttpSourceRequest:
+      type: object
+      properties:
+        uri:
+          type: string
+          format: uri
+
+    S3SourceRequest:
+      type: object
+      properties:
+        bucket:
+          type: string
+        key:
+          type: string
+
+    ConvertDocumentResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    PresignedUrlConvertDocumentResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+                format: uri
+              expires_at:
+                type: string
+                format: date-time
+
+    ChunkDocumentResponse:
+      type: object
+      properties:
+        chunks:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    ClearResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              code:
+                type: string
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              code:
+                type: string
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+              code:
+                type: string
+
+security:
+  - apiKeyHeader: []
+securitySchemes:
+  apiKeyHeader:
+    type: apiKey
+    in: header
+    name: Authorization
