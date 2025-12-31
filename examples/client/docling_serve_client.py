@@ -6,25 +6,24 @@ import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
+from docling_serve.datamodel.responses import (
+    HealthCheckResponse,
+    TaskStatusResponse
+)
+
 logger = logging.getLogger(__name__)
 
 WAITING_TIME = 2
 
-class HealthCheckResponse(BaseModel):
-    status: str
-
-class TaskStatusResponse(BaseModel):
-    task_id: str
-    task_type: str
-    task_status: str
-    task_position: Optional[int] = None
-    task_meta: Optional[Dict[str, Any]] = None
+API_URL = "http://localhost:5001"
+PROCESS_URL_ENDPOINT = "/v1/convert/source/async"
+PROCESS_FILE_ENDPOINT = "/v1/convert/file/async"
 
 
 class DoclingServeClient:
     def __init__(
             self,
-            base_url: str = "http://localhost:5001",
+            base_url: str = API_URL,
             api_key: Optional[str] = None,
             timeout: float = 120.0
     ):
@@ -40,17 +39,27 @@ class DoclingServeClient:
         resp = self._request("GET", "/health")
         return HealthCheckResponse.model_validate(resp.json())
 
+
+
+
+
     def convert_source_sync(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """POST /v1/convert/source (synchronous)"""
         resp = self._request("POST", "/v1/convert/source", json=request)
         return resp.json()
 
-    def convert_source_async(self, request: Dict[str, Any]) -> TaskStatusResponse:
-        """POST /v1/convert/source/async"""
-        resp = self._request("POST", "/v1/convert/source/async", json=request)
-        return TaskStatusResponse.model_validate(resp.json())
+    def wait_for_success(self, task_id: str):
+        status_is_done = False
+        while status_is_done != True:
+            time.sleep(WAITING_TIME)
+            logger.debug("Task %s not done yet, sleeping %s seconds", task_id, WAITING_TIME)
+            resp_task_status_obj = self._request("GET", f"/v1/status/poll/{task_id}", timeout=WAITING_TIME).json()
+            if resp_task_status_obj["task_status"] == "success":
+                status_is_done = True
+        # self._request("GET", f"/v1/result/{task_obj_id}", timeout=WAITING_TIME)
+        return status_is_done
 
-    def convert_file_sync(self, files: List[Path | str], options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def process_file_async(self, files: List[Path | str], options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """POST /v1/convert/file (multipart file upload)"""
         files_data = []
         file_handles = []  # Track handles to close them later
@@ -66,23 +75,24 @@ class DoclingServeClient:
 
         # **FIX**: Serialize options dict to JSON string for multipart form
         data: Dict[str, str] = {}
+        #                         ("Docling (JSON)", "json"),
+        #                         ("Markdown", "md"),
+        #                         ("HTML", "html"),
+        #                         ("Plain Text", "text"),
+        #                         ("Doc Tags", "doctags")
+        #
+
         if options:
             data["options"] = json.dumps(options)
 
         #Call to the endpoint "/v1/convert/file"
         try:
-            resp = self._request("POST", "/v1/convert/file/async", files=files_data, data=data)
+            resp = self._request("POST", PROCESS_FILE_ENDPOINT, files=files_data, data=data)
             task_obj = resp.json()
             task_obj_id = task_obj["task_id"]
-            status_is_done = False
-            while status_is_done != True:
-                time.sleep(WAITING_TIME)
-                logger.debug("Task %s not done yet, sleeping %s seconds", task_obj_id, WAITING_TIME)
-                resp_task_status_obj = self._request("GET", f"/v1/status/poll/{task_obj_id}", timeout=WAITING_TIME).json()
-                if resp_task_status_obj["task_status"] == "success":
-                    status_is_done = True
-            #self._request("GET", f"/v1/result/{task_obj_id}", timeout=WAITING_TIME)
-            result_obj = self._request("GET", f"/v1/result/{task_obj_id}", timeout=WAITING_TIME)
+            if self.wait_for_success(task_obj_id):
+                result_obj = self.get_parsed_result(task_obj_id)
+            #result_obj = self._request("GET", f"/v1/result/{task_obj_id}", timeout=WAITING_TIME)
             return result_obj.json()
         finally:
                 # Always close file handles
@@ -95,10 +105,10 @@ class DoclingServeClient:
         resp = self._request("GET", f"/v1/status/poll/{task_id}", params=params)
         return TaskStatusResponse.model_validate(resp.json())
 
-    def task_result(self, task_id: str) -> Dict[str, Any]:
+    def get_parsed_result(self, task_id: str) -> Dict[str, Any]:
         """GET /v1/result/{task_id}"""
         resp = self._request("GET", f"/v1/result/{task_id}")
-        return resp.json()
+        return resp
 
     def clear_converters(self):
         """GET /v1/clear/converters"""
@@ -123,30 +133,41 @@ class DoclingServeClient:
 
         return resp
 
+def process_url_async(client: DoclingServeClient,
+        url_path, selected_option) -> TaskStatusResponse:
+    """POST /v1/convert/source/async"""
+    request = {
+        "url": url_path,
+        "model": "docling-minilm-legacy",  # arXiv PDFs often need this
+        "pages": "all"
+    }
+    resp = client.request(method, url_path, **kwargs) # self._request("POST", PROCESS_URL_ENDPOINT, json=request)
+    return TaskStatusResponse.model_validate(resp.json())
 
-def convert_pdf_to_markdown(
+def process_pdf(
         client: DoclingServeClient,
-        pdf_path
-) -> Optional[str]:
+        pdf_path, selected_option
+):
     """Convert PDF to Markdown with proper async polling"""
     pdf_file = Path(pdf_path)
     if not pdf_file.exists():
         raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 
-    options = {"output_format": "markdown"}
+    #markdown
+    options = {"output_format": selected_option}
 
     try:
-        resp = client.convert_file_sync([pdf_path], options)
+        resp = client.process_file_async([pdf_path], options)
 
         # Extract markdown (multiple possible structures)
         def extract_markdown(data: Any) -> Optional[str]:
             if isinstance(data, dict):
-                # D
+                # Document to be processed, could be markdown, Json, html, text
                 if "md_content" in data["document"]:
-
                     return str(data.get("document").get("md_content"))
-
             return None
+
+
 
         markdown = extract_markdown(resp)
         return markdown
@@ -155,7 +176,8 @@ def convert_pdf_to_markdown(
         raise RuntimeError(f"PDF conversion failed: {e}")
 
 
-# Usage example
+
+
 if __name__ == "__main__":
 
     logging.basicConfig(
@@ -170,12 +192,21 @@ if __name__ == "__main__":
         print("Health:", client.health().status)
 
         # Convert PDF file
-        markdown = convert_pdf_to_markdown(client, "./pdf_storage/pasticceria_scandinava.pdf")
-        if markdown:
-            print("✅ Markdown extracted successfully!")
-            print(markdown[:1000])
+        markdown_file = process_pdf(client, "./pdf_storage/arrosti_rolle.pdf", "markdown")
+        if markdown_file:
+            print("✅ Markdown from file extracted successfully!")
+            print(markdown_file[:100])
         else:
             print("❌ No markdown found in response")
+        #
+        markdown_url = process_url_async(client, "https://arxiv.org/pdf/2501.17887" )
+
+        if markdown_url:
+            print("✅ Markdown from file extracted successfully!")
+            print(markdown_url[:100])
+        else:
+            print("❌ No markdown found in response")
+
 
     finally:
         client.close()
