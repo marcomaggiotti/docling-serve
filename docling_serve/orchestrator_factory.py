@@ -312,7 +312,6 @@ def get_async_orchestrator() -> BaseOrchestrator:
             results_prefix=docling_serve_settings.eng_rq_results_prefix,
             sub_channel=docling_serve_settings.eng_rq_sub_channel,
             scratch_dir=get_scratch(),
-            results_ttl=docling_serve_settings.eng_rq_results_ttl,
         )
 
         return RedisAwareRQOrchestrator(config=rq_config)
