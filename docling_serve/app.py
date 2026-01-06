@@ -432,6 +432,7 @@ def create_app():  # noqa: C901
     def health() -> HealthCheckResponse:
         return HealthCheckResponse()
 
+    #TO_FIX duplicated
     # API readiness compatibility for OpenShift AI Workbench
     @app.get("/api", include_in_schema=False)
     def api_check() -> HealthCheckResponse:

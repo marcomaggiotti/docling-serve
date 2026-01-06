@@ -192,7 +192,7 @@ if __name__ == "__main__":
         print("Health:", client.health().status)
 
         # Convert PDF file
-        markdown_file = process_pdf(client, "./pdf_storage/arrosti_rolle.pdf", "markdown")
+        markdown_file = process_pdf(client, "./pdf_storage/pasticceria_scandinava.pdf", "markdown")
         if markdown_file:
             print("✅ Markdown from file extracted successfully!")
             print(markdown_file[:100])

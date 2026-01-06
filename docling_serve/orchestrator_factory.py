@@ -202,11 +202,9 @@ class RedisTaskStatusMixin:
 
             data: dict[str, Any] = {
                 "task_id": task.task_id,
-                "task_type": (
-                    task.task_type.value
-                    if hasattr(task.task_type, "value")
-                    else str(task.task_type)
-                ),
+                "task_type": task.task_type.value
+                if hasattr(task.task_type, "value")
+                else str(task.task_type),
                 "task_status": task.task_status.value,
                 "processing_meta": meta,
             }

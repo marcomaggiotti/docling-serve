@@ -16,7 +16,8 @@ Running [Docling](https://github.com/docling-project/docling) as an API service.
 - And more
 
 > [!NOTE]
-> **Migration to the `v1` API.** Docling Serve now has a stable v1 API. Read more on the [migration to v1](./docs/v1_migration.md).
+> **Migration to the `v1` API.** Docling Serve now has a stable v1 API. Rea+
+> d more on the [migration to v1](./docs/v1_migration.md).
 
 ## Getting started
 
@@ -25,7 +26,11 @@ Install the `docling-serve` package and run the server.
 ```bash
 # Using the python package
 pip install "docling-serve[ui]"
+pip install gradio
+pip install --upgrade gradio
 docling-serve run --enable-ui
+
+if gradio is not found restart the terminal to update the environment
 
 # Using container images, e.g. with Podman
 podman run -p 5001:5001 -e DOCLING_SERVE_ENABLE_UI=1 quay.io/docling-project/docling-serve
